@@ -69,7 +69,7 @@ year          = {2023},
 # Env setup option 1: docker (recommended)
   ```
   cd docker/
-  docker pull wenbowen123/foundationpose && docker tag wenbowen123/foundationpose foundationpose  # Or to build from scratch: docker build --network host -t foundationpose .
+  docker build -t foundationpose:orin-nx .
   bash docker/run_container.sh
   ```
 
