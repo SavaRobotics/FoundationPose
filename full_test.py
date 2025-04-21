@@ -87,14 +87,32 @@ def fetch_depth(url, timeout=5):
         response = requests.get(url, timeout=timeout)
         if response.status_code == 200:
             img_array = np.frombuffer(response.content, dtype=np.uint8)
-            # Use IMREAD_UNCHANGED to preserve the original format
             depth = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
             
             # Debug information
             print(f"Depth image shape: {depth.shape}, dtype: {depth.dtype}")
+            valid_count = np.count_nonzero(depth > 0)
+            total_pixels = depth.size
+            valid_percent = (valid_count / total_pixels) * 100 if total_pixels > 0 else 0
+            print(f"Valid depth points: {valid_count}/{total_pixels} ({valid_percent:.2f}%)")
+            
+            # If depth is all zeros or almost all zeros, there's a problem
+            if valid_percent < 1:
+                print("⚠️ WARNING: Less than 1% of depth values are valid!")
+            
             print(f"Depth range: min={np.min(depth)}, max={np.max(depth)}")
             
-            # Ensure the depth image is 2D (it should be already)
+            # Ensure values are in the expected range for FoundationPose
+            # If depth is in millimeters, convert to meters
+            if np.max(depth) > 10 and depth.dtype != np.float32:  # Assuming depth > 10 means it's in mm
+                print("Converting depth from millimeters to meters...")
+                depth = depth.astype(np.float32) / 1000.0
+                print(f"New depth range: min={np.min(depth)}, max={np.max(depth)}")
+            
+            # Apply a minimal threshold to filter out noise
+            depth[depth < 0.001] = 0  # Filter out very close points that might be noise
+            
+            # Ensure the depth image is 2D
             if len(depth.shape) > 2:
                 print("WARNING: Depth image has more than 2 dimensions, taking first channel...")
                 depth = depth[:,:,0]
@@ -104,6 +122,19 @@ def fetch_depth(url, timeout=5):
             return None, f"Failed to fetch depth data: HTTP {response.status_code}"
     except requests.RequestException as e:
         return None, f"Error fetching depth data: {str(e)}"
+    
+# In your client code, after fetching the depth:
+def visualize_depth(depth_img):
+    """Create a heatmap visualization of depth data for debugging"""
+    # Normalize depth for visualization
+    depth_norm = cv2.normalize(depth_img, None, 0, 255, cv2.NORM_MINMAX)
+    depth_norm = depth_norm.astype(np.uint8)
+    depth_colormap = cv2.applyColorMap(depth_norm, cv2.COLORMAP_JET)
+    
+    # Mark invalid regions (0 depth) as black
+    depth_colormap[depth_img <= 0] = [0, 0, 0]
+    
+    return depth_colormap
 
 def fetch_depth_viz(url, timeout=5):
     """Fetch depth visualization for display purposes"""
@@ -324,6 +355,11 @@ def main():
             # Display the depth visualization instead of raw depth
             cv2.imshow("Depth Visualization", depth_viz_img)
 
+        # Then display raw depth heatmap
+        print("🌈 Displaying depth heatmap visualization...")
+        depth_visual = visualize_depth(depth_img)
+        cv2.imshow("Depth Heatmap", depth_visual)
+
         # Display the RGB image
         cv2.imshow("RGB Image", rgb_img)
         print("✅ Images fetched successfully. Press any key to continue to mask creation.")
@@ -336,6 +372,7 @@ def main():
         if mask_img is None:
             print("❌ Mask creation cancelled.")
             return 1
+
         
         # Save the RGB, depth and mask images
         timestamp = "000000"  # Using a fixed timestamp for a single image
@@ -348,6 +385,23 @@ def main():
         cv2.imwrite(depth_path, depth_img)
         cv2.imwrite(mask_path, mask_img)
         
+        # After creating the mask but before running pose estimation:
+        print(f"Mask stats: {np.count_nonzero(mask_img)}/{mask_img.size} pixels are True ({(np.count_nonzero(mask_img)/mask_img.size)*100:.2f}%)")
+
+        # Check if mask overlaps with valid depth
+        valid_depth = depth_img > 0  # Assuming 0 means invalid depth
+        overlap = np.logical_and(mask_img.astype(bool), valid_depth)
+        overlap_count = np.count_nonzero(overlap)
+        print(f"Mask-depth overlap: {overlap_count} valid depth points within mask")
+
+        if overlap_count == 0:
+            print("❌ ERROR: No valid depth points within the mask region!")
+            print("Suggestions:")
+            print("1. Check if the depth camera is capturing data for that object")
+            print("2. Try creating a mask over a different area with valid depth")
+            print("3. Verify that the depth and RGB images are properly aligned")
+            return 1
+
         # Load camera intrinsics
         K = load_camera_intrinsics(args.cam_intrinsics, args.camera_section)
         if K is None:
@@ -369,7 +423,7 @@ def main():
         except Exception as e:
             print(f"❌ Error loading mesh file: {str(e)}")
             return 1
-        
+
         # Set up FoundationPose
         print("🚀 Initializing FoundationPose model...")
         to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
