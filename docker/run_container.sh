@@ -23,3 +23,8 @@ docker run \
   -e DISPLAY=$DISPLAY \
   foundationpose:latest \
   bash -c "cd $DIR && bash"
+
+bash build_all.sh
+
+mkdir -p groundingdino/weights/
+wget -P groundingdino/weights/ https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth

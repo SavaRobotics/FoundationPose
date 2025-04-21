@@ -41,7 +41,7 @@ RUN conda init bash &&\
     conda activate my &&\
     pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118 &&\
     pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" &&\
-    pip install scipy joblib scikit-learn ruamel.yaml trimesh pyyaml opencv-python imageio open3d transformations warp-lang einops kornia pyrender
+    pip install groundingdino-py ultralytics scipy joblib scikit-learn ruamel.yaml trimesh pyyaml opencv-python imageio open3d transformations warp-lang einops kornia pyrender torch
 
 RUN cd / && git clone --recursive https://github.com/NVIDIAGameWorks/kaolin
 RUN conda activate my && cd /kaolin &&\
@@ -53,7 +53,7 @@ RUN cd / && git clone https://github.com/NVlabs/nvdiffrast &&\
 ENV OPENCV_IO_ENABLE_OPENEXR=1
 
 RUN conda activate my &&\
-    pip install scikit-image meshcat webdataset omegaconf pypng roma seaborn opencv-contrib-python openpyxl wandb imgaug Ninja xlsxwriter timm albumentations xatlas rtree nodejs jupyterlab objaverse g4f ultralytics==8.0.120 pycocotools videoio numba &&\
+    pip install scikit-image ultralytics torch groundingdino-py meshcat webdataset omegaconf pypng roma seaborn opencv-contrib-python openpyxl wandb imgaug Ninja xlsxwriter timm albumentations xatlas rtree nodejs jupyterlab objaverse g4f pycocotools videoio numba &&\
     conda install -y -c anaconda h5py
 
 

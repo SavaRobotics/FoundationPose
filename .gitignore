@@ -159,3 +159,6 @@ run_used.yml
 
 # Output directory
 /output_dir/
+
+# GroundingDINO weights
+groundingdino/weights/
