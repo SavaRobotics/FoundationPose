@@ -156,3 +156,20 @@ data/
 logs/
 !BundleTrack/XMem/inference/data
 run_used.yml
+
+# Exclude contents of output_dir while keeping directory structure
+output_dir/**/
+!output_dir/
+!output_dir/depth/
+!output_dir/mask/
+!output_dir/rgb/
+!output_dir/debug/
+!output_dir/debug/ob_in_cam/
+!output_dir/debug/track_vis/
+
+# Re-exclude all files in those directories
+output_dir/depth/*
+output_dir/mask/*
+output_dir/rgb/*
+output_dir/debug/ob_in_cam/*
+output_dir/debug/track_vis/*

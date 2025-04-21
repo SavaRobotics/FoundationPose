@@ -82,17 +82,41 @@ def fetch_image(url, timeout=5):
         return None, f"Error fetching image: {str(e)}"
 
 def fetch_depth(url, timeout=5):
-    """Fetch a depth image from the given URL"""
+    """Fetch raw depth data from the /depth endpoint"""
     try:
         response = requests.get(url, timeout=timeout)
         if response.status_code == 200:
             img_array = np.frombuffer(response.content, dtype=np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+            # Use IMREAD_UNCHANGED to preserve the original format
+            depth = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+            
+            # Debug information
+            print(f"Depth image shape: {depth.shape}, dtype: {depth.dtype}")
+            print(f"Depth range: min={np.min(depth)}, max={np.max(depth)}")
+            
+            # Ensure the depth image is 2D (it should be already)
+            if len(depth.shape) > 2:
+                print("WARNING: Depth image has more than 2 dimensions, taking first channel...")
+                depth = depth[:,:,0]
+            
+            return depth, None
+        else:
+            return None, f"Failed to fetch depth data: HTTP {response.status_code}"
+    except requests.RequestException as e:
+        return None, f"Error fetching depth data: {str(e)}"
+
+def fetch_depth_viz(url, timeout=5):
+    """Fetch depth visualization for display purposes"""
+    try:
+        response = requests.get(url, timeout=timeout)
+        if response.status_code == 200:
+            img_array = np.frombuffer(response.content, dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             return img, None
         else:
-            return None, f"Failed to fetch depth image: HTTP {response.status_code}"
+            return None, f"Failed to fetch depth visualization: HTTP {response.status_code}"
     except requests.RequestException as e:
-        return None, f"Error fetching depth image: {str(e)}"
+        return None, f"Error fetching depth visualization: {str(e)}"
 
 # Mask creation functions
 def paint_mask(event, x, y, flags, param):
@@ -282,19 +306,27 @@ def main():
         if rgb_img is None:
             print(f"❌ {rgb_error}")
             return 1
-        
-        # Fetch a single depth image
-        print("📏 Fetching depth image...")
+
+        # Fetch raw depth data (2D) for processing
+        print("📏 Fetching raw depth data...")
         depth_img, depth_error = fetch_depth(f"{base_url}/depth")
         if depth_img is None:
             print(f"❌ {depth_error}")
             return 1
-        
-        # Display the images for verification
+
+        # Fetch depth visualization for display
+        print("🌈 Fetching depth visualization...")
+        depth_viz_img, depth_viz_error = fetch_depth_viz(f"{base_url}/depth_viz")
+        if depth_viz_img is None:
+            print(f"⚠️ {depth_viz_error}")
+            print("Continuing without depth visualization...")
+        else:
+            # Display the depth visualization instead of raw depth
+            cv2.imshow("Depth Visualization", depth_viz_img)
+
+        # Display the RGB image
         cv2.imshow("RGB Image", rgb_img)
-        cv2.imshow("Depth Image", depth_img)
         print("✅ Images fetched successfully. Press any key to continue to mask creation.")
-        print("⚠️ You can exit the program at any time using Ctrl+C")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         
