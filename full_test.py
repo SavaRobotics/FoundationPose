@@ -299,7 +299,7 @@ def convert_camera_intrinsics(intrinsics_file, camera_section="LEFT_CAM_FHD1200"
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='FoundationPose HTTP Image Processor')
-    parser.add_argument('--url', default="https://3d55-162-218-227-129.ngrok-free.app", 
+    parser.add_argument('--url', default="https://2548-162-218-227-129.ngrok-free.app", 
                         help='Base URL of the HTTP server (e.g., http://localhost:8080)')
     parser.add_argument('--mesh_file', default="data/bent_test_1.obj", 
                         help='Path to the CAD model file (.obj)')

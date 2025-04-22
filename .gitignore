@@ -162,3 +162,6 @@ run_used.yml
 
 # GroundingDINO weights
 groundingdino/weights/
+
+# .pt files
+*.pt

@@ -20,6 +20,9 @@ import signal
 from urllib.parse import urlparse
 import torch
 
+# Global flag for debugging mode - load images from files instead of HTTP
+DEBUG_MODE = False
+
 # Import FoundationPose components
 # These imports assume you have the FoundationPose repo properly set up
 try:
@@ -54,11 +57,7 @@ def set_logging_format():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-# Global variables for mask creation
-drawing = False
-brush_size = 10
-mask = None
-image_for_mask = None
+# Global variables
 exit_requested = False
 
 # Signal handler for graceful exit
@@ -83,7 +82,8 @@ def create_output_dirs(output_dir):
         f"{output_dir}/debug",
         f"{output_dir}/debug/track_vis",
         f"{output_dir}/debug/ob_in_cam",
-        f"{output_dir}/debug/detection",  # New directory for detection results
+        f"{output_dir}/debug/detection",  # Directory for detection results
+        f"{output_dir}/debug/segmentation",  # New directory for segmentation results
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
@@ -170,83 +170,8 @@ def fetch_depth_viz(url, timeout=5):
     except requests.RequestException as e:
         return None, f"Error fetching depth visualization: {str(e)}"
 
-# Mask creation functions
-def paint_mask(event, x, y, flags, param):
-    """Mouse callback function for mask painting"""
-    global drawing, mask, brush_size
-    
-    if event == cv2.EVENT_LBUTTONDOWN:
-        drawing = True
-        cv2.circle(mask, (x, y), brush_size, 255, -1)  # Fill
-    
-    elif event == cv2.EVENT_MOUSEMOVE and drawing:
-        cv2.circle(mask, (x, y), brush_size, 255, -1)
-    
-    elif event == cv2.EVENT_LBUTTONUP:
-        drawing = False
-
-def change_brush_size(event, x, y, flags, param):
-    """Mouse wheel callback for brush size adjustment"""
-    global brush_size
-    if event == cv2.EVENT_MOUSEWHEEL:
-        if flags > 0:
-            brush_size = min(brush_size + 2, 50)  # Max 50
-        else:
-            brush_size = max(brush_size - 2, 2)   # Min 2
-        print(f"🖌 Brush Size: {brush_size}")
-
-def create_mask(rgb_image):
-    """Create a mask for the given RGB image using interactive painting"""
-    global mask, drawing, brush_size, image_for_mask, exit_requested
-    
-    image_for_mask = rgb_image.copy()
-    mask = np.zeros(rgb_image.shape[:2], dtype=np.uint8)
-    drawing = False
-    
-    window_name = "Paint Mask (Press 's' to save and continue, ESC to cancel)"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback(window_name, paint_mask)
-    
-    print("\n🖌 Mask Creation Instructions:")
-    print("- Left-click and drag to paint the mask")
-    print("- Press 's' key (on the OpenCV window, not terminal) to save the mask and continue")
-    print("- Press ESC key (on the OpenCV window, not terminal) to cancel")
-    print("- You can also press Ctrl+C in the terminal to exit at any time")
-    print("- Note: You must click on the OpenCV window first, then press the keys\n")
-    
-    while not exit_requested:
-        try:
-            mask_overlay = cv2.addWeighted(image_for_mask, 0.6, cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), 0.4, 0)
-            cv2.putText(mask_overlay, f"Brush Size: {brush_size}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(mask_overlay, "Press 's' to save, ESC to cancel", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow(window_name, mask_overlay)
-            
-            # Use a short timeout to check for exit_requested flag periodically
-            key = cv2.waitKey(100) & 0xFF
-            
-            if key == 27:  # ESC key to cancel
-                cv2.destroyWindow(window_name)
-                return None
-            elif key == ord('s'):  # 's' key to save
-                cv2.destroyWindow(window_name)
-                return mask
-                
-            # Check if exit was requested by signal handler
-            if exit_requested:
-                cv2.destroyWindow(window_name)
-                return None
-                
-        except KeyboardInterrupt:
-            print("\n⚠️ Keyboard interrupt detected! Exiting mask creation...")
-            cv2.destroyWindow(window_name)
-            return None
-            
-    # This will be reached if exit_requested is set by signal handler
-    cv2.destroyWindow(window_name)
-    return None
-
-# NEW: Grounding DINO detection function
-def detect_objects_with_grounding_dino(image, text_prompt, confidence_threshold=0.35, box_threshold=0.3):
+# Grounding DINO detection function with enhanced visualization
+def detect_objects_with_grounding_dino(image, text_prompt, confidence_threshold=0.35, box_threshold=0.3, debug_dir=None):
     """
     Detect objects in an image using Grounding DINO with a text prompt
     
@@ -255,6 +180,7 @@ def detect_objects_with_grounding_dino(image, text_prompt, confidence_threshold=
         text_prompt: Text prompt for detection (e.g., "bent sheet metal")
         confidence_threshold: Confidence threshold for text-conditioning
         box_threshold: Box threshold for detection
+        debug_dir: Directory to save debug visualizations
         
     Returns:
         boxes: Detected bounding boxes [x1, y1, x2, y2, score]
@@ -267,42 +193,153 @@ def detect_objects_with_grounding_dino(image, text_prompt, confidence_threshold=
     try:
         print(f"🔍 Running Grounding DINO detection with prompt: '{text_prompt}'...")
         
-        # Convert OpenCV's BGR to RGB and create a temporary file
+        # Show what DINO sees before running the model
+        input_vis = image.copy()
+        cv2.putText(input_vis, f"DINO Input - Prompt: '{text_prompt}'", 
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.imshow("DINO Input", input_vis)
+        
+        # Save the input visualization
+        if debug_dir:
+            input_path = f"{debug_dir}/detection/dino_input.png"
+            cv2.imwrite(input_path, input_vis)
+            print(f"💾 Saved DINO input visualization to {input_path}")
+            
+        cv2.waitKey(1000)  # Show for 1 second before continuing
+        
+        # Convert OpenCV's BGR to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        temp_path = "temp_image_for_dino.jpg"
-        cv2.imwrite(temp_path, cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        
+        # Debug the RGB conversion
+        print(f"Image shape: {image_rgb.shape}, dtype: {image_rgb.dtype}")
+        print(f"Sample RGB values at center: {image_rgb[image_rgb.shape[0]//2, image_rgb.shape[1]//2]}")
+        
+        # Save RGB image for direct inspection
+        if debug_dir:
+            rgb_debug_path = f"{debug_dir}/detection/dino_input_rgb.png"
+            cv2.imwrite(rgb_debug_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))  # Convert back to BGR for saving
+            print(f"💾 Saved RGB input for debugging to {rgb_debug_path}")
+            
+        # Method 1: Using direct PIL conversion (preferred)
+        from PIL import Image
+        pil_image = Image.fromarray(image_rgb)
+        temp_path = f"{debug_dir}/detection/temp_for_dino.jpg" if debug_dir else "temp_for_dino.jpg"
+        pil_image.save(temp_path)
+        print(f"💾 Saved temporary file for DINO at {temp_path}")
         
         # Load the Grounding DINO model
-        model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", 
-                          "groundingdino/weights/groundingdino_swint_ogc.pth")
+        model = load_model("GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py", 
+                          "GroundingDINO/groundingdino/weights/groundingdino_swint_ogc.pth")
         
-        # Load and preprocess the image
-        image_source, _ = load_image(temp_path)
+        # Load and preprocess the image with diagnostics
+        print(f"Loading image from {temp_path} for GroundingDINO")
+        image_source, image_orig = load_image(temp_path)
+        print(f"GroundingDINO loaded image shape: {image_source.shape}")
         
-        # Run prediction
-        boxes, logits, phrases = predict(
-            model=model,
-            image=image_source,
-            caption=text_prompt,
-            box_threshold=box_threshold,
-            text_threshold=confidence_threshold
-        )
+        # Run prediction with lowered thresholds if prompt is a simple object name
+        actual_box_threshold = box_threshold
+        actual_conf_threshold = confidence_threshold
         
-        # Clean up the temporary file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        # Lower thresholds for simple object names like "orange", "apple", etc.
+        if len(text_prompt.split()) == 1 and text_prompt.islower():
+            actual_box_threshold = max(0.1, box_threshold - 0.1)
+            actual_conf_threshold = max(0.1, confidence_threshold - 0.1)
+            print(f"Simple object name detected. Lowering thresholds to: box={actual_box_threshold}, conf={actual_conf_threshold}")
+        
+        # Try both the original prompt and with "a/an" prefix
+        prompts_to_try = [text_prompt]
+        if len(text_prompt.split()) == 1:
+            article = "an" if text_prompt[0].lower() in "aeiou" else "a"
+            prompts_to_try.append(f"{article} {text_prompt}")
+        
+        # Try each prompt
+        all_boxes = []
+        all_logits = []
+        all_phrases = []
+        
+        for prompt in prompts_to_try:
+            print(f"Trying prompt: '{prompt}'")
+            
+            # Load and preprocess the image with diagnostics
+            print(f"Loading image from {temp_path} for GroundingDINO")
+            image_source, image_transformed = load_image(temp_path)  # image_transformed is a tensor
+            print(f"GroundingDINO loaded image shape: {image_source.shape}")
+
+            # Run prediction with lowered thresholds if prompt is a simple object name
+            actual_box_threshold = box_threshold
+            actual_conf_threshold = confidence_threshold
+
+            # Lower thresholds for simple object names like "orange", "apple", etc.
+            if len(text_prompt.split()) == 1 and text_prompt.islower():
+                actual_box_threshold = max(0.1, box_threshold - 0.1)
+                actual_conf_threshold = max(0.1, confidence_threshold - 0.1)
+                print(f"Simple object name detected. Lowering thresholds to: box={actual_box_threshold}, conf={actual_conf_threshold}")
+
+            # Pass the device explicitly and use image_transformed (the tensor) instead of image_source (the numpy array)
+            boxes, logits, phrases = predict(
+                model=model,
+                image=image_transformed,  # Use the transformed tensor from load_image
+                caption=prompt,
+                box_threshold=actual_box_threshold,
+                text_threshold=actual_conf_threshold,
+                device="cuda" if torch.cuda.is_available() else "cpu"  # Explicitly specify device
+            )
+            
+            if len(boxes) > 0:
+                print(f"✅ Found {len(boxes)} results with prompt '{prompt}'")
+                all_boxes.extend(boxes)
+                all_logits.extend(logits)
+                all_phrases.extend([prompt] * len(boxes))
+                break
+            else:
+                print(f"❌ No results found with prompt '{prompt}'")
+        
+        # If no results were found with any prompt, use the original results
+        if len(all_boxes) == 0:
+            print("⚠️ No objects detected with any prompt. Using original results.")
+            all_boxes = boxes
+            all_logits = logits
+            all_phrases = phrases
         
         # Convert boxes to the format [x1, y1, x2, y2, score]
         result_boxes = []
-        for i in range(len(boxes)):
-            x1, y1, x2, y2 = boxes[i].tolist()
+        phrases_to_return = []
+        
+        for i in range(len(all_boxes)):
+            x1, y1, x2, y2 = all_boxes[i].tolist()
+            
             # Convert normalized coordinates to absolute coordinates
             h, w = image.shape[:2]
             x1, x2 = x1 * w, x2 * w
             y1, y2 = y1 * h, y2 * h
-            result_boxes.append([x1, y1, x2, y2, logits[i].item()])
+            
+            # Get confidence score
+            score = all_logits[i].item() if isinstance(all_logits[i], torch.Tensor) else all_logits[i]
+            
+            result_boxes.append([x1, y1, x2, y2, score])
+            phrases_to_return.append(all_phrases[i])
+            
+            print(f"  Box {i+1}: [{int(x1)}, {int(y1)}, {int(x2)}, {int(y2)}], score: {score:.4f}, phrase: '{all_phrases[i]}'")
         
-        return result_boxes, phrases
+        # Visualize detection results
+        if len(result_boxes) > 0:
+            print(f"✅ DINO detected {len(result_boxes)} objects!")
+        else:
+            print("⚠️ DINO didn't detect any objects with the given prompt.")
+        
+        # Create and display visualization of the boxes
+        detection_vis = visualize_detections(image, result_boxes, phrases_to_return)
+        cv2.imshow("DINO Detection Results", detection_vis)
+        
+        # Save the detection visualization
+        if debug_dir:
+            detection_path = f"{debug_dir}/detection/dino_detection.png"
+            cv2.imwrite(detection_path, detection_vis)
+            print(f"💾 Saved DINO detection results to {detection_path}")
+            
+        cv2.waitKey(1000)  # Show for 1 second before continuing
+        
+        return result_boxes, phrases_to_return
     
     except Exception as e:
         print(f"❌ Error during Grounding DINO detection: {str(e)}")
@@ -310,7 +347,7 @@ def detect_objects_with_grounding_dino(image, text_prompt, confidence_threshold=
         traceback.print_exc()
         return None, None
 
-# NEW: Visualize detection boxes
+# Visualize detection boxes
 def visualize_detections(image, boxes, phrases):
     """
     Visualize detected bounding boxes and phrases on the image
@@ -334,17 +371,22 @@ def visualize_detections(image, boxes, phrases):
         # Draw label
         label = f"{phrases[i]}: {score:.2f}"
         cv2.putText(vis_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        
+        # Draw the center point (will be used for SAM)
+        center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+        cv2.circle(vis_img, (center_x, center_y), 5, (255, 0, 0), -1)
     
     return vis_img
 
-# NEW: SAM2 segmentation function
-def segment_objects_with_sam2(image, boxes):
+# SAM2 segmentation function with point prompts
+def segment_objects_with_sam2(image, boxes, debug_dir=None):
     """
-    Segment objects using SAM2 with bounding boxes as prompts
+    Segment objects using SAM2 with bounding boxes and center points as prompts
     
     Args:
         image: RGB image (numpy array)
         boxes: Detected bounding boxes [x1, y1, x2, y2, score]
+        debug_dir: Directory to save debug visualizations
         
     Returns:
         masks: Binary masks for each detected object
@@ -356,23 +398,58 @@ def segment_objects_with_sam2(image, boxes):
     try:
         print("🎭 Running SAM2 segmentation...")
         
-        # Load the SAM model from Ultralytics
-        model = SAM("sam2_b.pt")
-        
         # Process each bounding box with SAM2
         all_masks = []
-        for box in boxes:
+        box_vis_img = image.copy()  # Create a copy for visualization
+        
+        # Load the SAM model from Ultralytics
+        model = SAM("sam_b.pt")
+        
+        for idx, box in enumerate(boxes):
             x1, y1, x2, y2, _ = box
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             
-            # Use the bounding box as a prompt for SAM2
+            # Calculate center point of the bounding box
+            center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+            
+            # Draw box and point on the input visualization
+            cv2.rectangle(box_vis_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.circle(box_vis_img, (center_x, center_y), 5, (255, 0, 0), -1)
+            cv2.putText(box_vis_img, f"Object {idx+1}", (x1, y1 - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        
+        # Show SAM input visualization
+        cv2.putText(box_vis_img, "SAM Input - Boxes and Points", 
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.imshow("SAM Input", box_vis_img)
+        
+        # Save the input visualization
+        if debug_dir:
+            sam_input_path = f"{debug_dir}/segmentation/sam_input.png"
+            cv2.imwrite(sam_input_path, box_vis_img)
+            print(f"💾 Saved SAM input visualization to {sam_input_path}")
+            
+        cv2.waitKey(1000)  # Show for 1 second before continuing
+        
+        # Process each bounding box
+        for idx, box in enumerate(boxes):
+            x1, y1, x2, y2, _ = box
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            
+            # Calculate center point of the bounding box
+            center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+            
+            print(f"Processing object {idx+1} with bounding box [{x1}, {y1}, {x2}, {y2}] and point [{center_x}, {center_y}]")
+            
+            # Use both the bounding box and the center point as prompts for SAM2
             results = model.predict(
                 source=image,
-                bboxes=[x1, y1, x2, y2],
+                prompt="orange",  # Text prompt
+                boxes=True,       # Enable box detection
+                conf=0.1,         # Confidence threshold
                 device="cuda" if torch.cuda.is_available() else "cpu",
                 retina_masks=True,
                 imgsz=1024,
-                conf=0.4,
                 iou=0.9
             )
             
@@ -395,10 +472,43 @@ def segment_objects_with_sam2(image, boxes):
                     mask_binary = (mask_resized > 0.5).astype(np.uint8) * 255
                     mask = cv2.bitwise_or(mask, mask_binary)
                 
+                # Visualize this individual mask
+                mask_vis = visualize_single_mask(image.copy(), mask)
+                cv2.imshow(f"SAM Mask for Object {idx+1}", mask_vis)
+                
+                # Save individual mask visualization
+                if debug_dir:
+                    mask_path = f"{debug_dir}/segmentation/mask_object_{idx+1}.png"
+                    cv2.imwrite(mask_path, mask_vis)
+                    print(f"💾 Saved mask visualization for object {idx+1} to {mask_path}")
+                
+                cv2.waitKey(1000)  # Show for 1 second before continuing
+                
                 all_masks.append(mask)
             else:
-                print(f"⚠️ No mask found for bounding box {[x1, y1, x2, y2]}")
+                print(f"⚠️ No mask found for object {idx+1} at bounding box {[x1, y1, x2, y2]}")
                 all_masks.append(None)
+        
+        # Show combined results
+        if all_masks:
+            combined_mask = combine_masks(all_masks, image.shape[:2])
+            combined_vis = visualize_segmentations(image, all_masks)
+            cv2.putText(combined_vis, "SAM Final Segmentation Results", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.imshow("SAM Results", combined_vis)
+            
+            # Save the combined visualization
+            if debug_dir:
+                combined_path = f"{debug_dir}/segmentation/sam_results.png"
+                cv2.imwrite(combined_path, combined_vis)
+                
+                # Also save the raw mask
+                raw_mask_path = f"{debug_dir}/segmentation/combined_mask.png"
+                cv2.imwrite(raw_mask_path, combined_mask)
+                
+                print(f"💾 Saved combined SAM results to {combined_path}")
+            
+            cv2.waitKey(1000)  # Show for 1 second before continuing
         
         return all_masks
     
@@ -408,7 +518,38 @@ def segment_objects_with_sam2(image, boxes):
         traceback.print_exc()
         return None
 
-# NEW: Visualize segmentation masks
+# Visualize a single mask
+def visualize_single_mask(image, mask):
+    """
+    Visualize a single segmentation mask on the image
+    
+    Args:
+        image: RGB image (numpy array)
+        mask: Binary mask
+        
+    Returns:
+        Visualization image
+    """
+    vis_img = image.copy()
+    if mask is not None:
+        # Create color overlay for mask
+        mask_color = np.zeros_like(vis_img)
+        mask_color[:,:,0] = 0   # B
+        mask_color[:,:,1] = 0   # G
+        mask_color[:,:,2] = 255 # R
+        
+        # Apply mask
+        mask_bool = mask > 0
+        mask_overlay = cv2.bitwise_and(mask_color, mask_color, mask=mask)
+        vis_img = cv2.addWeighted(vis_img, 1.0, mask_overlay, 0.5, 0)
+        
+        # Draw contours
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(vis_img, contours, -1, (0, 255, 255), 2)
+    
+    return vis_img
+
+# Visualize segmentation masks
 def visualize_segmentations(image, masks):
     """
     Visualize segmentation masks on the image
@@ -421,13 +562,22 @@ def visualize_segmentations(image, masks):
         Visualization image
     """
     vis_img = image.copy()
-    for mask in masks:
+    for i, mask in enumerate(masks):
         if mask is not None:
-            # Create color overlay for mask
+            # Create color overlay for mask - use different colors for multiple masks
             mask_color = np.zeros_like(vis_img)
-            mask_color[:,:,0] = 0   # B
-            mask_color[:,:,1] = 0   # G
-            mask_color[:,:,2] = 255 # R
+            if i % 3 == 0:
+                mask_color[:,:,0] = 0   # B
+                mask_color[:,:,1] = 0   # G
+                mask_color[:,:,2] = 255 # R
+            elif i % 3 == 1:
+                mask_color[:,:,0] = 0   # B
+                mask_color[:,:,1] = 255 # G
+                mask_color[:,:,2] = 0   # R
+            else:
+                mask_color[:,:,0] = 255 # B
+                mask_color[:,:,1] = 0   # G
+                mask_color[:,:,2] = 0   # R
             
             # Apply mask
             mask_bool = mask > 0
@@ -437,10 +587,18 @@ def visualize_segmentations(image, masks):
             # Draw contours
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(vis_img, contours, -1, (0, 255, 255), 2)
+            
+            # Add label
+            M = cv2.moments(mask)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                cv2.putText(vis_img, f"Object {i+1}", (cX, cY), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     
     return vis_img
 
-# NEW: Combine masks if multiple objects are detected
+# Combine masks if multiple objects are detected
 def combine_masks(masks, shape):
     """
     Combine multiple masks into a single mask
@@ -460,7 +618,7 @@ def combine_masks(masks, shape):
     
     return combined_mask
 
-# NEW: Function to get a text prompt from the user for object detection
+# Function to get a text prompt from the user for object detection
 def get_text_prompt(default_prompt="bent sheet metal part"):
     """Get a text prompt from the user for object detection"""
     print("\n🔍 Object Detection Prompt:")
@@ -547,7 +705,7 @@ def convert_camera_intrinsics(intrinsics_file, camera_section="LEFT_CAM_FHD1200"
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='FoundationPose HTTP Image Processor with Grounding DINO and SAM2')
-    parser.add_argument('--url', default="https://3d55-162-218-227-129.ngrok-free.app", 
+    parser.add_argument('--url', default="https://7250-162-218-227-129.ngrok-free.app", 
                         help='Base URL of the HTTP server (e.g., http://localhost:8080)')
     parser.add_argument('--mesh_file', default="data/bent_test_1.obj", 
                         help='Path to the CAD model file (.obj)')
@@ -561,16 +719,21 @@ def main():
                         help='Number of estimation refinement iterations')
     parser.add_argument('--debug', type=int, default=2,
                         help='Debug level (0-3)')
-    # New arguments for detection and segmentation
-    parser.add_argument('--auto_mask', action='store_true',
-                        help='Use automatic masking with Grounding DINO and SAM2')
+    # Arguments for detection and segmentation
     parser.add_argument('--prompt', default="bent sheet metal",
                         help='Text prompt for Grounding DINO detection (default: "bent sheet metal")')
-    parser.add_argument('--confidence', type=float, default=0.35,
-                        help='Confidence threshold for detection (default: 0.35)')
-    parser.add_argument('--box_threshold', type=float, default=0.3,
-                        help='Box threshold for detection (default: 0.3)')
+    parser.add_argument('--confidence', type=float, default=0.25,  # Lower default threshold
+                        help='Confidence threshold for detection (default: 0.25)')
+    parser.add_argument('--box_threshold', type=float, default=0.2,  # Lower default threshold
+                        help='Box threshold for detection (default: 0.2)')
+    # Debug mode argument
+    parser.add_argument('--debug_mode', action='store_true',
+                        help='Enable debug mode to load images from files instead of HTTP')
     args = parser.parse_args()
+    
+    # Set global debug mode flag
+    global DEBUG_MODE
+    DEBUG_MODE = args.debug_mode
     
     try:
         # Set up logging
@@ -584,33 +747,91 @@ def main():
         # Ensure the URL doesn't have a trailing slash
         base_url = args.url.rstrip('/')
         
-        print(f"🌐 Connecting to {base_url}")
-        print(f"   RGB endpoint: {base_url}/rgb")
-        print(f"   Depth endpoint: {base_url}/depth")
+        # Define timestamp for filenames - using a fixed value for a single image
+        timestamp = "000000"
         
-        # Fetch a single RGB image
-        print("📸 Fetching RGB image...")
-        rgb_img, rgb_error = fetch_image(f"{base_url}/rgb")
-        if rgb_img is None:
-            print(f"❌ {rgb_error}")
-            return 1
+        # Get RGB and depth images either from HTTP or local files
+        if DEBUG_MODE:
+            # Debug mode - load images from local files
+            print("🔍 DEBUG MODE: Loading images from local files...")
+            
+            # Load RGB image
+            rgb_path = f"{args.output_dir}/rgb/{timestamp}.png"
+            print(f"📸 Loading RGB image from {rgb_path}...")
+            rgb_img = cv2.imread(rgb_path)
+            if rgb_img is None:
+                print(f"❌ Error: Cannot load RGB image from {rgb_path}")
+                return 1
+                
+            # Load depth image
+            depth_path = f"{args.output_dir}/depth/{timestamp}.png"
+            print(f"📏 Loading depth image from {depth_path}...")
+            # In your debug mode loading section, replace:
+            # depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
-        # Fetch raw depth data (2D) for processing
-        print("📏 Fetching raw depth data...")
-        depth_img, depth_error = fetch_depth(f"{base_url}/depth")
-        if depth_img is None:
-            print(f"❌ {depth_error}")
-            return 1
-
-        # Fetch depth visualization for display
-        print("🌈 Fetching depth visualization...")
-        depth_viz_img, depth_viz_error = fetch_depth_viz(f"{base_url}/depth_viz")
-        if depth_viz_img is None:
-            print(f"⚠️ {depth_viz_error}")
-            print("Continuing without depth visualization...")
+            # with:
+            depth_npy_path = f"{args.output_dir}/depth/{timestamp}.npy"
+            if os.path.exists(depth_npy_path):
+                # Load from numpy file if available (perfect precision)
+                depth_img = np.load(depth_npy_path)
+                print(f"📏 Loaded depth from NPY file: {depth_npy_path}")
+            else:
+                # Load from PNG (may have quantization)
+                depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+                # If we saved in mm, convert back to meters
+                if np.max(depth_img) > 10:
+                    depth_img = depth_img.astype(np.float32) / 1000.0
+                print(f"📏 Loaded depth from PNG file: {depth_path}")
+            if depth_img is None:
+                print(f"❌ Error: Cannot load depth image from {depth_path}")
+                return 1
+                
+            # If depth is in millimeters, convert to meters
+            if np.max(depth_img) > 10 and depth_img.dtype != np.float32:
+                print("Converting depth from millimeters to meters...")
+                depth_img = depth_img.astype(np.float32) / 1000.0
+                
+            # Ensure the depth image is 2D
+            if len(depth_img.shape) > 2:
+                print("WARNING: Depth image has more than 2 dimensions, taking first channel...")
+                depth_img = depth_img[:,:,0]
+                
+            # Apply a minimal threshold to filter out noise
+            depth_img[depth_img < 0.001] = 0  # Filter out very close points that might be noise
+                
+            # Create depth visualization for display
+            depth_viz_img = visualize_depth(depth_img)
         else:
-            # Display the depth visualization instead of raw depth
-            cv2.imshow("Depth Visualization", depth_viz_img)
+            # Normal mode - fetch images from HTTP
+            print(f"🌐 Connecting to {base_url}")
+            print(f"   RGB endpoint: {base_url}/rgb")
+            print(f"   Depth endpoint: {base_url}/depth")
+            
+            # Fetch a single RGB image
+            print("📸 Fetching RGB image...")
+            rgb_img, rgb_error = fetch_image(f"{base_url}/rgb")
+            if rgb_img is None:
+                print(f"❌ {rgb_error}")
+                return 1
+
+            # Fetch raw depth data (2D) for processing
+            print("📏 Fetching raw depth data...")
+            depth_img, depth_error = fetch_depth(f"{base_url}/depth")
+            if depth_img is None:
+                print(f"❌ {depth_error}")
+                return 1
+
+            # Fetch depth visualization for display
+            print("🌈 Fetching depth visualization...")
+            depth_viz_img, depth_viz_error = fetch_depth_viz(f"{base_url}/depth_viz")
+            if depth_viz_img is None:
+                print(f"⚠️ {depth_viz_error}")
+                print("Continuing without depth visualization...")
+                # Generate our own visualization
+                depth_viz_img = visualize_depth(depth_img)
+
+        # Display the depth visualization
+        cv2.imshow("Depth Visualization", depth_viz_img)
 
         # Then display raw depth heatmap
         print("🌈 Displaying depth heatmap visualization...")
@@ -619,88 +840,80 @@ def main():
 
         # Display the RGB image
         cv2.imshow("RGB Image", rgb_img)
-        print("✅ Images fetched successfully. Press any key to continue.")
+        print("✅ Images loaded successfully. Press any key to continue.")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         
-        # Process the mask creation, either automatically or manually
-        mask_img = None
-        
-        # Use automatic mask creation if enabled
-        if args.auto_mask:
-            # Allow the user to type a custom prompt or use the default
-            if args.prompt == "bent sheet metal":
-                text_prompt = get_text_prompt(args.prompt)
-            else:
-                text_prompt = args.prompt
-                
-            print(f"🔍 Using '{text_prompt}' as the detection prompt")
-            
-            # Run Grounding DINO for object detection
-            boxes, phrases = detect_objects_with_grounding_dino(
-                rgb_img, 
-                text_prompt, 
-                confidence_threshold=args.confidence,
-                box_threshold=args.box_threshold
-            )
-            
-            if boxes and len(boxes) > 0:
-                # Visualize detections
-                detection_vis = visualize_detections(rgb_img, boxes, phrases)
-                cv2.imshow("Detected Objects", detection_vis)
-                cv2.waitKey(0)
-                
-                # Save detection visualization
-                detection_path = f"{debug_dir}/detection/detection_vis.png"
-                cv2.imwrite(detection_path, detection_vis)
-                
-                # Run SAM2 for segmentation
-                masks = segment_objects_with_sam2(rgb_img, boxes)
-                
-                if masks and len(masks) > 0:
-                    # Visualize segmentations
-                    segmentation_vis = visualize_segmentations(rgb_img, masks)
-                    cv2.imshow("Segmented Objects", segmentation_vis)
-                    
-                    # Ask user to accept or reject the automatic mask
-                    print("\n🎭 Automatic mask created. Press 'a' to accept, 'r' to reject and create manually.")
-                    key = cv2.waitKey(0) & 0xFF
-                    
-                    if key == ord('a'):
-                        # Combine masks if multiple objects are detected
-                        mask_img = combine_masks(masks, rgb_img.shape[:2])
-                        print("✅ Automatic mask accepted.")
-                    else:
-                        print("❌ Automatic mask rejected. Falling back to manual mask creation.")
-                        mask_img = create_mask(rgb_img)
-                        
-                    cv2.destroyAllWindows()
-                else:
-                    print("❌ No valid masks generated. Falling back to manual mask creation.")
-                    mask_img = create_mask(rgb_img)
-            else:
-                print(f"❌ No objects detected with prompt '{text_prompt}'. Falling back to manual mask creation.")
-                mask_img = create_mask(rgb_img)
+        # Allow the user to type a custom prompt or use the default
+        if args.prompt == "bent sheet metal":
+            text_prompt = get_text_prompt(args.prompt)
         else:
-            # Use manual mask creation
-            print("🎭 Using manual mask creation...")
-            mask_img = create_mask(rgb_img)
+            text_prompt = args.prompt
             
-        # Check if mask creation was cancelled
-        if mask_img is None:
-            print("❌ Mask creation cancelled.")
+        print(f"🔍 Using '{text_prompt}' as the detection prompt")
+        
+        # Run Grounding DINO for object detection
+        boxes, phrases = detect_objects_with_grounding_dino(
+            rgb_img, 
+            text_prompt, 
+            confidence_threshold=args.confidence,
+            box_threshold=args.box_threshold,
+            debug_dir=debug_dir
+        )
+        
+        # Check if detection was successful
+        if not boxes or len(boxes) == 0:
+            print(f"❌ No objects detected with prompt '{text_prompt}'. Exiting.")
             return 1
+            
+        # Run SAM2 for segmentation with bounding boxes and center points
+        masks = segment_objects_with_sam2(rgb_img, boxes, debug_dir=debug_dir)
+        
+        # Check if segmentation was successful
+        if not masks or len(masks) == 0:
+            print("❌ No valid masks generated. Exiting.")
+            return 1
+            
+        # Combine masks if multiple objects are detected
+        mask_img = combine_masks(masks, rgb_img.shape[:2])
         
         # Save the RGB, depth and mask images
-        timestamp = "000000"  # Using a fixed timestamp for a single image
         rgb_path = f"{args.output_dir}/rgb/{timestamp}.png"
         depth_path = f"{args.output_dir}/depth/{timestamp}.png"
         mask_path = f"{args.output_dir}/mask/{timestamp}.png"
         
         print(f"💾 Saving images to {args.output_dir}...")
         cv2.imwrite(rgb_path, rgb_img)
-        cv2.imwrite(depth_path, depth_img)
+        
+        # Save depth data properly to preserve floating-point values
+        if depth_img.dtype == np.float32 or depth_img.dtype == np.float64:
+            # Option 1: Save as 16-bit PNG (scaled)
+            depth_scaled = (depth_img * 1000.0).astype(np.uint16)  # Convert meters to mm for storage
+            cv2.imwrite(depth_path, depth_scaled)
+            
+            # Option 2: Also save as numpy array for perfect precision
+            depth_npy_path = f"{args.output_dir}/depth/{timestamp}.npy"
+            np.save(depth_npy_path, depth_img)
+            print(f"💾 Saved raw depth data as both PNG and NPY: {depth_path}, {depth_npy_path}")
+        else:
+            # If already integer type, save directly
+            cv2.imwrite(depth_path, depth_img)
+            print(f"💾 Saved raw depth data: {depth_path}")
+
         cv2.imwrite(mask_path, mask_img)
+
+        # Save depth visualizations
+        depth_viz_path = f"{args.output_dir}/debug/depth_viz_{timestamp}.png"
+        depth_heatmap_path = f"{args.output_dir}/debug/depth_heatmap_{timestamp}.png"
+
+        # Save depth visualization from server (if available) or the generated one
+        cv2.imwrite(depth_viz_path, depth_viz_img)
+
+        # Save the depth heatmap visualization that's generated locally
+        depth_heatmap = visualize_depth(depth_img)
+        cv2.imwrite(depth_heatmap_path, depth_heatmap)
+
+        print(f"💾 Saved depth visualizations to {depth_viz_path} and {depth_heatmap_path}")
         
         # After creating the mask but before running pose estimation:
         print(f"Mask stats: {np.count_nonzero(mask_img)}/{mask_img.size} pixels are True ({(np.count_nonzero(mask_img)/mask_img.size)*100:.2f}%)")
@@ -715,7 +928,7 @@ def main():
             print("❌ ERROR: No valid depth points within the mask region!")
             print("Suggestions:")
             print("1. Check if the depth camera is capturing data for that object")
-            print("2. Try creating a mask over a different area with valid depth")
+            print("2. Try using a different detection prompt")
             print("3. Verify that the depth and RGB images are properly aligned")
             return 1
 
