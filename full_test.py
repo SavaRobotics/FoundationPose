@@ -17,6 +17,7 @@ import sys
 import re
 import signal
 from urllib.parse import urlparse
+import math
 
 # Import FoundationPose components
 # These imports assume you have the FoundationPose repo properly set up
@@ -296,6 +297,71 @@ def convert_camera_intrinsics(intrinsics_file, camera_section="LEFT_CAM_FHD1200"
         print(f"❌ Error converting camera intrinsics: {str(e)}")
         return None
 
+def rotation_matrix_to_euler_angles(R):
+    """Convert 3x3 rotation matrix to Euler angles (roll, pitch, yaw) in radians"""
+    # Check if we're in the singularity known as "Gimbal lock"
+    if abs(R[2, 0]) > 0.9999:
+        # Special case: pitch is around ±90°
+        yaw = 0
+        if R[2, 0] < 0:
+            pitch = math.pi/2
+            roll = math.atan2(R[0, 1], R[1, 1])
+        else:
+            pitch = -math.pi/2
+            roll = -math.atan2(R[0, 1], R[1, 1])
+    else:
+        # Standard case
+        pitch = -math.asin(R[2, 0])
+        roll = math.atan2(R[2, 1]/math.cos(pitch), R[2, 2]/math.cos(pitch))
+        yaw = math.atan2(R[1, 0]/math.cos(pitch), R[0, 0]/math.cos(pitch))
+    
+    return roll, pitch, yaw
+
+def convert_pose_matrix_to_6d(pose_matrix):
+    """Convert 4x4 pose matrix to 6D pose (x, y, z, roll, pitch, yaw)"""
+    # Extract translation (in meters)
+    x = pose_matrix[0, 3]
+    y = pose_matrix[1, 3]
+    z = pose_matrix[2, 3]
+    
+    # Extract rotation and convert to Euler angles (in radians)
+    R = pose_matrix[:3, :3]
+    roll, pitch, yaw = rotation_matrix_to_euler_angles(R)
+    
+    # Convert radians to degrees
+    roll_deg = math.degrees(roll)
+    pitch_deg = math.degrees(pitch)
+    yaw_deg = math.degrees(yaw)
+    
+    # Convert meters to inches (1 meter = 39.3701 inches)
+    x_inch = x * 39.3701
+    y_inch = y * 39.3701
+    z_inch = z * 39.3701
+    
+    return x_inch, y_inch, z_inch, roll_deg, pitch_deg, yaw_deg
+
+def send_pose_to_server(url, pose_matrix):
+    """Send the pose matrix to the server via POST request"""
+    try:
+        # Flatten the pose matrix to a space-separated string
+        pose_str = ' '.join(map(str, pose_matrix.flatten()))
+        
+        # Send the POST request to /pose endpoint
+        response = requests.post(f"{url}/pose", data=pose_str)
+        
+        if response.status_code == 200:
+            # Parse the 6D pose received from the server
+            pose_6d = response.text
+            print(f"✅ Pose sent successfully. Received 6D pose: {pose_6d}")
+            return pose_6d
+        else:
+            print(f"❌ Failed to send pose: HTTP {response.status_code}")
+            print(f"Response: {response.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Error sending pose: {str(e)}")
+        return None
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='FoundationPose HTTP Image Processor')
@@ -464,6 +530,14 @@ def main():
             pose_path = f"{args.output_dir}/debug/ob_in_cam/{timestamp}.txt"
             np.savetxt(pose_path, pose.reshape(4, 4))
             print(f"✅ Pose saved to {pose_path}")
+            
+            # Send the pose to the server
+            print(f"📤 Sending pose to {base_url}/pose...")
+            pose_6d = send_pose_to_server(base_url, pose.reshape(4, 4))
+            if pose_6d:
+                x, y, z, roll, pitch, yaw = map(float, pose_6d.split(','))
+                print(f"📏 Object position (inches): x={x:.4f}, y={y:.4f}, z={z:.4f}")
+                print(f"🔄 Object rotation (degrees): roll={roll:.4f}, pitch={pitch:.4f}, yaw={yaw:.4f}")
             
             # Visualize result if debug mode is enabled
             if args.debug >= 1:
