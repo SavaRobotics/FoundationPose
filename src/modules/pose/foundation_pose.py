@@ -130,7 +130,7 @@ class FoundationPoseEstimator(BaseProcessor):
             except (ImportError, ModuleNotFoundError):
                 self.logger.warning("pytorch3d.renderer.dibr not available - using fallback renderer")
                 glctx = None  # Fallback to None context
-            
+             
             # Initialize FoundationPose estimator
             est = FoundationPose(
                 model_pts=mesh.vertices,
