@@ -88,6 +88,8 @@ def publish_pose(pose_6d):
     
     print(f"Connected to NetworkTables server")
 
+    # TODO yes/no parentheses?
+
     pose_str = f"{pose_6d[0]:.3f},{pose_6d[1]:.3f},{pose_6d[2]:.3f},{pose_6d[3]:.3f},{pose_6d[4]:.3f},{pose_6d[5]:.3f}"
     
     vision_table = NetworkTables.getTable(VISION_TABLE)
@@ -144,7 +146,7 @@ def main():
     pose_6d = PoseTransformer().transform_pose(center_pose)
     print(f"✅ Pose 6D: {pose_6d}")
 
-    #publish_pose(pose_6d)
+    publish_pose(pose_6d)
 
 if __name__ == "__main__":
     main()
