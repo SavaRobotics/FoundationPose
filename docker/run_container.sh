@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+#sudo usermod -aG docker ubuntu
+#sudo apt-get update
+#sudo reboot
+
 # kill any old one
 docker rm -f foundationpose 2>/dev/null || true
 
