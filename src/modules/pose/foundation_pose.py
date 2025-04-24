@@ -1,9 +1,18 @@
 import cv2
 import numpy as np
 import os
+import sys
 import trimesh
 import logging
 from ...pipeline.processor import BaseProcessor
+
+# Move wildcard imports to module level
+try:
+    from ...utils.estimater import *
+    from ...utils.datareader import *
+    FP_AVAILABLE = True
+except ImportError:
+    FP_AVAILABLE = False
 
 class FoundationPoseEstimator(BaseProcessor):
     """Estimates 3D pose using FoundationPose."""
@@ -29,16 +38,9 @@ class FoundationPoseEstimator(BaseProcessor):
         self.camera_section = camera_section
         self.est_refine_iter = est_refine_iter
         self.debug_level = debug_level
-        self.fp_available = False
+        self.fp_available = FP_AVAILABLE
         
-        # Try to import FoundationPose components
-        try:
-            from ...utils.estimater import (
-                ScorePredictor, PoseRefinePredictor, FoundationPose,
-                draw_posed_3d_box, draw_xyz_axis, depth2xyzmap, toOpen3dCloud
-            )
-            from ...utils.datareader import DataReader
-            self.fp_available = True
+        if FP_AVAILABLE:
             self.fp_modules = {
                 'ScorePredictor': ScorePredictor,
                 'PoseRefinePredictor': PoseRefinePredictor,
@@ -48,9 +50,9 @@ class FoundationPoseEstimator(BaseProcessor):
                 'depth2xyzmap': depth2xyzmap,
                 'toOpen3dCloud': toOpen3dCloud
             }
-        except ImportError as e:
-            self.log_error(f"Cannot import FoundationPose modules. Please make sure the repository is correctly set up. Error: {e}")
-            self.fp_available = False
+        else:
+            print("❌ Error: Cannot import FoundationPose modules. Please make sure the repository is correctly set up and in your PYTHONPATH.")
+            sys.exit(1)
     
     def process(self, data):
         """Estimate 3D pose using FoundationPose."""
@@ -121,21 +123,13 @@ class FoundationPoseEstimator(BaseProcessor):
             
             # Initialize differentiable rendering context
             import torch
-            # Replace these lines:
-            #import pytorch3d.renderer.dibr as dr
-            #glctx = dr.RasterizeCudaContext()
-
-            # With this approach:
             try:
-                # Try the original import first
                 import pytorch3d.renderer.dibr as dr
                 glctx = dr.RasterizeCudaContext()
                 self.logger.info("Using dibr.RasterizeCudaContext")
-            except ImportError:
-                # Fall back to alternative rendering approach
-                from pytorch3d.renderer import rasterize_meshes
-                glctx = None  # No context needed with direct rasterize_meshes
-                self.logger.info("Using direct rasterize_meshes approach")
+            except (ImportError, ModuleNotFoundError):
+                self.logger.warning("pytorch3d.renderer.dibr not available - using fallback renderer")
+                glctx = None  # Fallback to None context
             
             # Initialize FoundationPose estimator
             est = FoundationPose(

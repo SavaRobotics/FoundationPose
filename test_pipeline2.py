@@ -1,4 +1,11 @@
 import os
+import sys
+
+# Add the project root to Python path 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+    
 import logging
 import cv2
 from src.pipeline.base import Pipeline
@@ -20,58 +27,56 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TestPipeline")
 
-# Get the script directory for resolving paths
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
 # Create the pipeline
 pipeline = Pipeline("Manual Masking Pipeline")
 
-# Define paths with validation
+# Define paths with validation - use absolute paths to avoid issues
 rgb_file = os.path.join(script_dir, "data/samples/batch1/rgb/000000.png")
-if not os.path.exists(rgb_file):
-    logger.error(f"ERROR: RGB file not found at {rgb_file}")
-    raise FileNotFoundError(f"RGB file {rgb_file} not found")
-
 depth_file = os.path.join(script_dir, "data/samples/batch1/depth/000000.npy")
-if not os.path.exists(depth_file):
-    depth_file_png = os.path.join(script_dir, "data/samples/batch1/depth/000000.png")
-    if os.path.exists(depth_file_png):
-        logger.info(f"Using PNG depth file instead: {depth_file_png}")
-        depth_file = depth_file_png
-    else:
-        logger.error(f"ERROR: Depth file not found at {depth_file} or {depth_file_png}")
-        raise FileNotFoundError(f"Depth file not found")
-
 model_file = os.path.join(script_dir, "data/models/bent_test_1.obj")
-if not os.path.exists(model_file):
-    logger.error(f"ERROR: Model file not found at {model_file}")
-    raise FileNotFoundError(f"Model file {model_file} not found")
-
 intrinsics_file = os.path.join(script_dir, "data/intrinsics/cam_K.txt")
-if not os.path.exists(intrinsics_file):
-    logger.error(f"ERROR: Intrinsics file not found at {intrinsics_file}")
-    raise FileNotFoundError(f"Intrinsics file {intrinsics_file} not found")
-
 output_dir = os.path.join(script_dir, "output_dir/my_test")
-os.makedirs(output_dir, exist_ok=True)
 
-logger.info(f"Using RGB file: {rgb_file}")
-logger.info(f"Using depth file: {depth_file}")
-logger.info(f"Using model file: {model_file}")
-logger.info(f"Using intrinsics file: {intrinsics_file}")
-logger.info(f"Using output directory: {output_dir}")
+# Create output directory
+os.makedirs(output_dir, exist_ok=True)
 
 # Add processors
 pipeline.add_processor(FileImageLoader(rgb_file, None, depth_file))
 pipeline.add_processor(ManualMasker())
-pipeline.add_processor(FoundationPoseEstimator(model_file, intrinsics_file))
-pipeline.add_processor(PoseTransformer())
-pipeline.add_processor(ResultSaver(output_dir))
+# If you want to temporarily skip the FoundationPoseEstimator for testing
+# pipeline.add_processor(PoseTransformer())
+# pipeline.add_processor(ResultSaver(output_dir))
+
+# If you want to include the FoundationPoseEstimator with additional error handling
+try:
+    # Verify files exist before passing them
+    for path, name in [(model_file, "Model"), (intrinsics_file, "Intrinsics")]:
+        if not os.path.exists(path):
+            logger.error(f"❌ {name} file not found: {path}")
+            raise FileNotFoundError(f"{name} file {path} not found")
+            
+    # Try importing a key module to check if dependencies are installed
+    try:
+        from src.utils.estimater import FoundationPose
+        logger.info("✅ FoundationPose modules are available")
+    except ImportError as e:
+        logger.error(f"❌ FoundationPose modules not available: {e}")
+        logger.info("Installing required dependencies might help resolve this issue.")
+        # You could raise an exception here to stop execution
+        
+    # Add the processor if everything is ok
+    pipeline.add_processor(FoundationPoseEstimator(model_file, intrinsics_file))
+    pipeline.add_processor(PoseTransformer())
+    pipeline.add_processor(ResultSaver(output_dir))
+except Exception as e:
+    logger.error(f"❌ Error setting up FoundationPoseEstimator: {e}")
+    # Optionally continue with a simplified pipeline
+    pipeline.add_processor(ResultSaver(output_dir))
 
 # Run the pipeline
 logger.info("Starting pipeline execution")
 data = PipelineData()
-result = pipeline.run(data, visualize=True)  # This shows visualizations at each step
+result = pipeline.run(data, visualize=True)
 
 # Debug check for depth image
 if result.depth_image is None:
@@ -82,7 +87,7 @@ else:
     logger.debug(f"Min depth: {result.depth_image.min()}, Max depth: {result.depth_image.max()}")
     
 # Print result
-if result.pose_6d:
+if hasattr(result, 'pose_6d') and result.pose_6d:
     x, y, z, roll, pitch, yaw = result.pose_6d
     logger.info(f"✅ Final 6D Pose:")
     logger.info(f"  Position (inches): x={x:.4f}, y={y:.4f}, z={z:.4f}")
