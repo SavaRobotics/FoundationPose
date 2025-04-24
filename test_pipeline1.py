@@ -10,7 +10,7 @@ from src.modules.output.network_tables import NetworkTablesPublisher
 # Create pipeline
 pipeline = Pipeline("Custom Pipeline")
 
-# Add processors in the order you want them to execute
+# TODO: Add processors in the order you want them to execute
 pipeline.add_processor(HttpImageFetcher("http://example.com"))
 pipeline.add_processor(GroundingDinoDetector("object name"))
 pipeline.add_processor(SAM2Segmenter())
