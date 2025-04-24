@@ -16,8 +16,8 @@ from ultralytics import YOLO, SAM
 
 # Import FoundationPose components
 try:
-    from estimater import *
-    from datareader import *
+    from src.foundationpose.utils.estimater import *
+    from src.foundationpose.utils.datareader import *
 except ImportError:
     print("Error: Cannot import FoundationPose modules.")
     sys.exit(1)

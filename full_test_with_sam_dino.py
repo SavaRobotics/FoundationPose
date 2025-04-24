@@ -26,8 +26,8 @@ DEBUG_MODE = False
 # Import FoundationPose components
 # These imports assume you have the FoundationPose repo properly set up
 try:
-    from estimater import *
-    from datareader import *
+    from src.foundationpose.utils.estimater import *
+    from src.foundationpose.utils.datareader import *
 except ImportError:
     print("❌ Error: Cannot import FoundationPose modules. Please make sure the repository is correctly set up and in your PYTHONPATH.")
     sys.exit(1)

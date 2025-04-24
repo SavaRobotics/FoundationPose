@@ -20,8 +20,8 @@ sys.path.append(f'{code_dir}/../../../')
 from learning.datasets.h5_dataset import *
 from learning.models.score_network import *
 from learning.datasets.pose_dataset import *
-from Utils import *
-from datareader import *
+from src.foundationpose.utils.Utils import *
+from src.foundationpose.utils.datareader import *
 
 
 def vis_batch_data_scores(pose_data, ids, scores, pad_margin=5):

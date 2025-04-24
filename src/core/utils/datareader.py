@@ -7,7 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 
-from Utils import *
+from src.foundationpose.utils.Utils import *
 import json,os,sys
 
 

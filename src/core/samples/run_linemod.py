@@ -7,7 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 
-from Utils import *
+from src.foundationpose.utils.Utils import *
 import json,uuid,joblib,os,sys
 import scipy.spatial as spatial
 from multiprocessing import Pool
@@ -15,8 +15,8 @@ import multiprocessing
 from functools import partial
 from itertools import repeat
 import itertools
-from datareader import *
-from estimater import *
+from src.foundationpose.utils.datareader import *
+from src.foundationpose.utils.estimater import *
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/mycpp/build')
 import yaml

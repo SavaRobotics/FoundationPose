@@ -7,8 +7,8 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 
-from Utils import *
-from datareader import *
+from src.foundationpose.utils.Utils import *
+from src.foundationpose.utils.datareader import *
 import itertools
 from learning.training.predict_score import *
 from learning.training.predict_pose_refine import *
