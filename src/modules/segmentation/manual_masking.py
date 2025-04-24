@@ -174,6 +174,4 @@ class ManualMasker(Processor):
         """Visualize mask results."""
         if "mask" in data.debug_images and data.debug_images["mask"] is not None:
             cv2.imshow("Manual Mask", data.debug_images["mask"])
-            print("Mask shown. Press any key to continue.")
-            cv2.waitKey(0)
             cv2.destroyAllWindows()

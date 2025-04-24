@@ -14,7 +14,7 @@ import numpy as np
 import torch
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../../../../')
-from src.foundationpose.utils.Utils import *
+from src.utils.Utils import *
 
 
 @dataclass

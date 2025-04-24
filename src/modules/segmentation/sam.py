@@ -237,6 +237,4 @@ class SAM2Segmenter(Processor):
         """Visualize segmentation results."""
         if "segmentation" in data.debug_images and data.debug_images["segmentation"] is not None:
             cv2.imshow("SAM Segmentation Results", data.debug_images["segmentation"])
-            print("Segmentation results shown. Press any key to continue.")
-            cv2.waitKey(0)
             cv2.destroyAllWindows()

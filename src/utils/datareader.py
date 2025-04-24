@@ -7,12 +7,40 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 
-from src.foundationpose.utils.Utils import *
+from .Utils import *
 import json,os,sys
 
 
 BOP_LIST = ['lmo','tless','ycbv','hb','tudl','icbin','itodd']
 BOP_DIR = os.getenv('BOP_DIR')
+
+# TODO could be problematic
+class DataReader:
+    """Base class for different data readers"""
+    def __init__(self, video_dir, zfar=np.inf):
+        self.video_dir = video_dir
+        self.zfar = zfar
+        
+    @staticmethod
+    def create(video_dir, zfar=np.inf):
+        """Factory method to create the appropriate reader"""
+        if 'ycbv' in video_dir or 'YCB' in video_dir:
+            return YcbVideoReader(video_dir, zfar=zfar)
+        if 'lmo' in video_dir or 'LINEMOD-O' in video_dir:
+            return LinemodOcclusionReader(video_dir, zfar=zfar)
+        if 'tless' in video_dir or 'TLESS' in video_dir:
+            return TlessReader(video_dir, zfar=zfar)
+        if 'hb' in video_dir:
+            return HomebrewedReader(video_dir, zfar=zfar)
+        if 'tudl' in video_dir:
+            return TudlReader(video_dir, zfar=zfar)
+        if 'icbin' in video_dir:
+            return IcbinReader(video_dir, zfar=zfar)
+        if 'itodd' in video_dir:
+            return ItoddReader(video_dir, zfar=zfar)
+        else:
+            raise RuntimeError(f"No appropriate reader found for {video_dir}")
+
 
 def get_bop_reader(video_dir, zfar=np.inf):
   if 'ycbv' in video_dir or 'YCB' in video_dir:

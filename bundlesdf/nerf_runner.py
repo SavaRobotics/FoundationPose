@@ -26,7 +26,8 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../')
 sys.path.append(f'{code_dir}')
 from nerf_helpers import *
-from src.foundationpose.utils.Utils import *
+from src.utils.Utils import *
+from src.utils.offscreen_renderer import ModelRendererOffscreen
 
 
 def batchify(fn, chunk):
@@ -1130,7 +1131,6 @@ class NerfRunner:
     if self.models['pose_array'] is not None:
       tf = self.models['pose_array'].get_matrices(frame_ids)@tf
     tf = tf.data.cpu().numpy()
-    from src.foundationpose.utils.offscreen_renderer import ModelRendererOffscreen
 
     tex_image = torch.zeros((tex_res,tex_res,3)).cuda().float()
     weight_tex_image = torch.zeros(tex_image.shape[:-1]).cuda().float()

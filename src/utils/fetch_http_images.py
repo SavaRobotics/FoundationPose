@@ -119,8 +119,6 @@ def main():
     if args.visualize:
         cv2.imshow("RGB Image", rgb_img)
         cv2.imshow("Depth Visualization", depth_viz)
-        print("Press any key to exit...")
-        cv2.waitKey(0)
         cv2.destroyAllWindows()
     
     return 0

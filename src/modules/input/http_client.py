@@ -175,6 +175,4 @@ class HttpImageFetcher(Processor):
                 depth_visual = self._visualize_depth(data.depth_image)
                 cv2.imshow("Depth Heatmap", depth_visual)
         
-        print("Images fetched successfully. Press any key to continue.")
-        cv2.waitKey(0)
         cv2.destroyAllWindows()

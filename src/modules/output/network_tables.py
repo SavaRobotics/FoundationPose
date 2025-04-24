@@ -1,83 +1,60 @@
-# src/modules/output/network_tables.py
-import time
-from ...pipeline.base import Processor
+#!/usr/bin/env python3
 
-class NetworkTablesPublisher(Processor):
-    """Publishes pose data to NetworkTables."""
-    
-    def __init__(self, server_url=None, vision_table="Vision", entry_name="FoundationPose", timeout=10):
-        self.server_url = server_url
-        self.vision_table = vision_table
-        self.entry_name = entry_name
-        self.timeout = timeout
-        self.nt = None
-        self.nt_available = False
+import os
+import time
+import sys
+from networktables import NetworkTables
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Import the NT schema
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+try:
+    from nt_schema import *
+except ImportError:
+    print("ERROR: Could not import nt_schema")
+    sys.exit(1)
+
+class NetworkTablesPublisher:
+    def __init__(self, server_url=os.environ.get('SERVER_URL', 'localhost')):
+        # Get NT server address from environment variable
+        self.nt_server = server_url
         
-        # Check if NetworkTables is available
-        try:
-            from networktables import NetworkTables
-            self.NetworkTables = NetworkTables
-            self.nt_available = True
-        except ImportError:
-            print("⚠️ Warning: Cannot import NetworkTables. Please install with: pip install pynetworktables")
-            self.nt_available = False
+        # Connect to NetworkTables
+        NetworkTables.initialize(server=self.nt_server)
+        
+        # Wait for NT connection
+        while not NetworkTables.isConnected():
+            print("Waiting for NetworkTables connection...")
+            time.sleep(1)
+        
+        print(f"Connected to NetworkTables server at {self.nt_server}")
+        
+        # Create table for publishing foundation pose
+        self.vision_table = NetworkTables.getTable(VISION_TABLE)
+    
+    def publish_pose(self, pose_6d):
+        """Publish a 6D pose to NetworkTables"""
+        # Format as string "x,y,z,roll,pitch,yaw"
+        pose_str = f"{pose_6d[0]:.3f},{pose_6d[1]:.3f},{pose_6d[2]:.3f},{pose_6d[3]:.3f},{pose_6d[4]:.3f},{pose_6d[5]:.3f}"
+        
+        # Publish to NT using constants from schema
+        self.vision_table.putString(FOUNDATION_POSE.split('/')[-1], pose_str)
+        
+        # Update timestamp for latency tracking
+        timestamp_key = VISION_TIMESTAMP.split('/')[-1]
+        self.vision_table.putNumber(timestamp_key, time.time())
+        
+        print(f"Published pose: {pose_str}")
+        
+        return pose_str
     
     def process(self, data):
-        """Publish pose data to NetworkTables."""
-        if not self.nt_available:
-            data.add_error("NetworkTablesPublisher", "NetworkTables is not available")
-            return data
-            
+        """Process data object and publish pose"""
         if data.pose_6d is None:
-            data.add_error("NetworkTablesPublisher", "No pose data available")
+            print("Error: No pose data available")
             return data
             
-        # Use the URL from data if not provided in constructor
-        server_url = self.server_url
-        if server_url is None and data.base_url is not None:
-            from urllib.parse import urlparse
-            parsed_url = urlparse(data.base_url)
-            server_url = parsed_url.netloc
-            if not server_url:
-                server_url = data.base_url.replace("http://", "").replace("https://", "").split("/")[0]
-        
-        if not server_url:
-            data.add_error("NetworkTablesPublisher", "No server URL available")
-            return data
-            
-        print(f"📤 Publishing pose to NetworkTables at {server_url}, table {self.vision_table}, entry {self.entry_name}")
-        
-        try:
-            # Connect to NetworkTables if not connected
-            if self.nt is None:
-                self.NetworkTables.initialize(server=server_url)
-                # Wait for connection
-                start_time = time.time()
-                while not self.NetworkTables.isConnected() and (time.time() - start_time) < self.timeout:
-                    print("Waiting for NetworkTables connection...")
-                    time.sleep(0.5)
-                
-                if not self.NetworkTables.isConnected():
-                    data.add_error("NetworkTablesPublisher", f"Failed to connect to NetworkTables server at {server_url}")
-                    return data
-                    
-                print(f"✅ Connected to NetworkTables server at {server_url}")
-                
-            # Get the table and set the value
-            table = self.NetworkTables.getTable(self.vision_table)
-            
-            # Format pose as comma-separated string
-            pose_str = ",".join(map(str, data.pose_6d))
-            table.putString(self.entry_name, pose_str)
-            
-            print(f"✅ Published pose to NetworkTables: {pose_str}")
-            
-        except Exception as e:
-            data.add_error("NetworkTablesPublisher", f"NetworkTables error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
+        self.publish_pose(data.pose_6d)
         return data
-    
-
-    

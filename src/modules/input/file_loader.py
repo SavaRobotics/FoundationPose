@@ -86,6 +86,4 @@ class FileImageLoader(Processor):
         if data.depth_viz_image is not None:
             cv2.imshow("Depth Visualization", data.depth_viz_image)
         
-        print("Images loaded successfully. Press any key to continue.")
-        cv2.waitKey(0)
         cv2.destroyAllWindows()

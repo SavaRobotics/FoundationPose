@@ -191,6 +191,4 @@ class GroundingDinoDetector(Processor):
         """Visualize detection results."""
         if "detection" in data.debug_images and data.debug_images["detection"] is not None:
             cv2.imshow("DINO Detection Results", data.debug_images["detection"])
-            print("Detection results shown. Press any key to continue.")
-            cv2.waitKey(0)
             cv2.destroyAllWindows()

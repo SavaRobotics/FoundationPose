@@ -17,8 +17,8 @@ import torch
 from omegaconf import OmegaConf
 from learning.models.refine_network import RefineNet
 from learning.datasets.h5_dataset import *
-from src.foundationpose.utils.Utils import *
-from src.foundationpose.utils.datareader import *
+from src.utils.Utils import *
+from src.utils.datareader import *
 
 
 

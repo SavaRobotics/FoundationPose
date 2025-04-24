@@ -17,7 +17,7 @@ import torch.nn as nn
 import time
 import cv2
 sys.path.append(f'{dir_path}/../../../../')
-from src.foundationpose.utils.Utils import *
+from src.utils.Utils import *
 
 
 
