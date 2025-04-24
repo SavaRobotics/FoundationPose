@@ -26,8 +26,8 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../')
 sys.path.append(f'{code_dir}')
 from nerf_helpers import *
-from src.utils.Utils import *
-from src.utils.offscreen_renderer import ModelRendererOffscreen
+from Utils import *
+from offscreen_renderer import ModelRendererOffscreen
 
 
 def batchify(fn, chunk):

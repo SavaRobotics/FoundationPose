@@ -10,7 +10,7 @@
 from nerf_runner import *
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../')
-from src.utils.datareader import *
+from datareader import *
 from bundlesdf.tool import *
 import yaml,argparse
 
