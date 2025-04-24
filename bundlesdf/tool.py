@@ -10,7 +10,7 @@
 import joblib,json,gzip,pickle
 from sklearn.cluster import DBSCAN
 import shutil,re,imageio,pdb,os,sys
-from src.utils.Utils import *
+from Utils import *
 import pandas as pd
 
 
