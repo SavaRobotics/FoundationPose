@@ -191,3 +191,40 @@ class FileLoader:
                 return None, f"Failed to fetch depth data: HTTP {response.status_code}"
         except requests.RequestException as e:
             return None, f"Error fetching depth data: {str(e)}"
+
+    def publish_pose(self, x, y, z, roll, pitch, yaw, timeout=5):
+        """
+        Publish pose data to the /pose endpoint
+        
+        Args:
+            x, y, z: Position coordinates (float)
+            roll, pitch, yaw: Orientation angles (float)
+            timeout: Request timeout in seconds
+            
+        Returns:
+            (success, error_message) tuple
+        """
+        try:
+            # Format the pose data exactly as expected by the server: 6 comma-separated values
+            pose_data = f"{x},{y},{z},{roll},{pitch},{yaw}"
+            
+            # Send the POST request with the formatted pose data
+            response = requests.post(
+                self.base_url + "/pose", 
+                data=pose_data,
+                headers={'Content-Type': 'text/plain'},
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ Successfully published pose: {pose_data}")
+                return True, None
+            else:
+                error_msg = f"Failed to publish pose: HTTP {response.status_code} - {response.text}"
+                print(f"❌ {error_msg}")
+                return False, error_msg
+                
+        except requests.RequestException as e:
+            error_msg = f"Error publishing pose: {str(e)}"
+            print(f"❌ {error_msg}")
+            return False, error_msg

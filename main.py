@@ -11,7 +11,6 @@ import sys
 import re
 import signal
 import datetime
-from networktables import NetworkTables
 from urllib.parse import urlparse  
 from src.estimater import *
 from src.datareader import *
@@ -29,7 +28,7 @@ from src.nt_schema import (
 
 output_dir = "output_dir"
 debug_dir = os.path.join(output_dir, "debug")
-base_url = "https://6d25-162-218-227-129.ngrok-free.app"
+base_url = "https://9835-162-218-227-129.ngrok-free.app"
 
 def run_foundation_pose(rgb_img, depth_img, mask_img, mesh, K):
     # Create timestamp for unique filenames
@@ -78,31 +77,6 @@ def run_foundation_pose(rgb_img, depth_img, mask_img, mesh, K):
     
     return center_pose
 
-def publish_pose(pose_6d):
-    NetworkTables.initialize(server=base_url)
-
-    # Wait for NT connection
-    while not NetworkTables.isConnected():
-        print("Waiting for NetworkTables connection...")
-        time.sleep(1)
-    
-    print(f"Connected to NetworkTables server")
-
-    # TODO yes/no parentheses?
-
-    pose_str = f"{pose_6d[0]:.3f},{pose_6d[1]:.3f},{pose_6d[2]:.3f},{pose_6d[3]:.3f},{pose_6d[4]:.3f},{pose_6d[5]:.3f}"
-    
-    vision_table = NetworkTables.getTable(VISION_TABLE)
-    
-    # Publish to NT using constants from schema
-    vision_table.putString(FOUNDATION_POSE.split('/')[-1], pose_str)
-
-    # Update timestamp for latency tracking
-    timestamp_key = VISION_TIMESTAMP.split('/')[-1]
-    vision_table.putNumber(timestamp_key, time.time())
-
-    print(f"✅ Published pose: {pose_str}")
-
 def main():
     print("📁 Creating output directories...")
     # create output and debug directories
@@ -145,8 +119,8 @@ def main():
     print("🔄 Transforming pose to 6D format...")
     pose_6d = PoseTransformer().transform_pose(center_pose)
     print(f"✅ Pose 6D: {pose_6d}")
-
-    publish_pose(pose_6d)
+    
+    file_loading.publish_pose(pose_6d[0], pose_6d[1], pose_6d[2], pose_6d[3], pose_6d[4], pose_6d[5])
 
 if __name__ == "__main__":
     main()
